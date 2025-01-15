@@ -1,4 +1,4 @@
-            // LCD module connections
+// LCD module connections
 sbit LCD_RS at RB4_bit;
 sbit LCD_EN at RB3_bit;
 sbit LCD_D4 at RB2_bit;    ///
@@ -14,6 +14,45 @@ sbit LCD_D6_Direction at TRISD7_bit;  //
 sbit LCD_D7_Direction at TRISD6_bit;
 // End LCD module connections
 
+int timer;
+
+void myydelayms( int mds) {
+     int delay = mds; // 1 overflow = 1 ms
+    timer = 0;                 // Reset overflow counter
+    while (timer < delay);
+}
+
+
+void ATD_init_A1(){
+ADCON0 = 0x41; // ATD ON, Dont go, channel 0, fosc/16
+ADCON1 = 0xC0; // All channels are digital except A0 , 500 khz , right justified
+}
+
+int ATD_read_A1(){
+ADCON0 = ADCON0 | 0x04; // GO
+while(ADCON0 & 0x04);
+return ((ADRESH<<8) | ADRESL);
+}
+
+
+
+
+
+
+void CCPPWM_init(){                  // Configure and CCP2 at 2ms period with 50% duty cycle
+        T2CON = 0x07;                    // Enable Timer2 at Fosc/4 with 1:16 prescaler (8 uS percount 2000uS to count 250 counts)
+        CCP2CON = 0x0C;                  // Enable PWM for CCP2
+        PR2 = 250;                       // 250 counts = 8uS *250 = 2ms period
+        CCPR2L = 125;                    // Buffer where we are specifying the pulse width (duty cycle)
+}
+
+
+void Speed(int p){
+       CCPR2L = p;                  // PWM from RC1
+}
+
+
+
 
 char txt[5];              // General used variable while printing on LCD
 
@@ -27,18 +66,18 @@ int angle = 100;  // using to determine the LCD shutter Servo ange
 unsigned  int x=0;  // general used
 
  // Temperature reading used variable using NTC
-float SpeedOfSound=0.0;
+int SpeedOfSound=0.0;
 int adc = 0;
 int TX_Temp;
 int TEMPERATURE =0;
-float T=0.0 ;
-const float T0=(float)1/298.15;     //  25°C = 298.15 Kelvin .
-const float  BB=(float)1/3380 ;    //  B is the beta constant of the NTC =3380 (SEE DATASHEET).
+int T=0 ;
+int T0=1/298;     //  25°C = 298.15 Kelvin .
+int  BB=1/3380 ;    //  BB is the beta constant of the NTC =3380 (SEE DATASHEET).
 //End of Temperature reading used variable using NTC
 
 
 //Ultrasonic Distance reading variables
-unsigned  int Distance=0;
+int Distance=0;
 long k1=0;
 long j=0;
 char check_sonic = 0;
@@ -70,41 +109,37 @@ char Openning_Flag=0; // LCD Shutter ON or OFF indicater flag bit
 int Increased_temp=0;
 int Board_min_temp=40;
 int Board_max_temp=80;
-float temp_percentage=0.0;
+int temp_percentage=0;
 //End of Fan Motor related variables
 
 int First_ON_Flag=1;
 
 
-// DHT11 sensor connection (here data pin is connected to pin RC4)
-sbit DHT11_PIN at RC4_bit;
-sbit DHT11_PIN_Direction at TRISC4_bit;
+
 int humid=0;
 unsigned short T_byte1, T_byte2, RH_byte1, RH_byte2, CheckSum ;
 // End DHT11 sensor connection
 
 
-
-
 void Start_Signal(void) {     // DHT11 Releated
-  DHT11_PIN_Direction = 0;                    // Configure connection pin as output
-  DHT11_PIN = 0;                              // Connection pin output low
-  delay_ms(25);                               // Wait 25 ms
-  DHT11_PIN = 1;                              // Connection pin output high
-  delay_us(25);                               // Wait 25 us
-  DHT11_PIN_Direction = 1;                    // Configure connection pin as input
+  PORTC=PORTC & 0B11101111;   // Configure connection pin as output
+  TRISC =TRISC&0B11101111;                              // Connection pin output low
+  myydelayms(25);                               // Wait 25 ms
+  TRISC =TRISC|0B00010000;                              // Connection pin output high
+  myydelayms(25);                               // Wait 25 us
+  PORTC =PORTC|0B00010000;                     // Configure connection pin as input
 }
 
 unsigned short Check_Response() {  // DHT11 Releated
   TMR1H = 0;                                  // Reset Timer1
   TMR1L = 0;
   TMR1ON_bit = 1;                             // Enable Timer1 module
-  while(!DHT11_PIN && TMR1L < 100);           // Wait until DHT11_PIN becomes high (cheking of 80µs low time response)
+  while(!(PORTC&0B00010000) && TMR1L < 100);           // Wait until DHT11_PIN becomes high (cheking of 80µs low time response)
   if(TMR1L > 99)                              // If response time > 99µS  ==> Response error
     return 0;                                 // Return 0 (Device has a problem with response)
   else {    TMR1H = 0;                        // Reset Timer1
     TMR1L = 0;
-    while(DHT11_PIN && TMR1L < 100);          // Wait until DHT11_PIN becomes low (cheking of 80µs high time response)
+    while(PORTC&0B00010000 && TMR1L < 100);          // Wait until DHT11_PIN becomes low (cheking of 80µs high time response)
     if(TMR1L > 99)                            // If response time > 99µS  ==> Response error
       return 0;                               // Return 0 (Device has a problem with response)
     else
@@ -118,13 +153,13 @@ unsigned short Read_Data(unsigned short* dht_data) {  // DHT11 Releated
   for(i = 0; i < 8; i++){
     TMR1H = 0;                                // Reset Timer1
     TMR1L = 0;
-    while(!DHT11_PIN)                         // Wait until DHT11_PIN becomes high
+    while(!(PORTC&0B00010000))                         // Wait until DHT11_PIN becomes high
       if(TMR1L > 100) {                       // If low time > 100  ==>  Time out error (Normally it takes 50µs)
         return 1;
       }
     TMR1H = 0;                                // Reset Timer1
     TMR1L = 0;
-    while(DHT11_PIN)                          // Wait until DHT11_PIN becomes low
+    while(PORTC&0B00010000)                          // Wait until DHT11_PIN becomes low
       if(TMR1L > 100) {                       // If high time > 100  ==>  Time out error (Normally it takes 26-28µs for 0 and 70µs for 1)
         return 1;                             // Return 1 (timeout error)
       }
@@ -148,7 +183,7 @@ void DHT11() {     // DHT11 Releated
 
     if(Check_Response()) {         // Check if there is a response from sensor (If OK start reding humidity and temperature data)
 
-      if(Read_Data(&RH_byte1) || Read_Data(&RH_byte2) || Read_Data(&T_byte1) || Read_Data(&T_byte2) || Read_Data(&Checksum)) {
+      if(Read_Data(RH_byte1) || Read_Data(RH_byte2) || Read_Data(T_byte1) || Read_Data(T_byte2) || Read_Data(Checksum)) {
 
       }
       else {                                               // If there is no time out error
@@ -161,9 +196,9 @@ void DHT11() {     // DHT11 Releated
 
 
 
-    T1CON = 0B00000000;
-    TMR1ON_bit = 0;          // Disable Timer1 module
-    delay_ms(1000);         // Wait 1 second
+
+
+    myydelayms(100);         // Wait 1 second
 
 
 }
@@ -179,117 +214,109 @@ void Read_Print_Control(){
   Sound_Play(2400, 100);
   Sound_Play(2600, 100);
 
-  delay_ms(500);
+  myydelayms(500);
 
   Sound_Play(2600, 100);
   Sound_Play(2400, 100);
   Sound_Play(2600, 100);
 
       Lcd_Out(1, 2, "LEVEL & PUMP");
-      //Lcd_Out(2, 3, "CONTROLLER");
-      delay_ms(5000);
+      myydelayms(2000);
 
       lcd_cmd(_LCD_CLEAR);
       Lcd_Out(1, 3, "DESIGNED By");
-      Lcd_Out(2, 3, "Leen Bilto");
-      delay_ms(5000);
+      Lcd_Out(2, 3, "ENG Leen Bilto");
+      myydelayms(2000);
 
 
 
-Keep_Tracking :
 
 
-                   
+
+
                 // Reading Tempereture using NTC and determining sound speed according to tempereture
-                ADCON0 = 0B00001001 ;   // ADC Module ON , Chanel 1 (AN1) choosed ,
-                adc  = adc_read(1);  // reading the analog volt on pin RA1 .
 
-                T=T0+(BB*log(((float)1023/adc )-1));     // PROBMEL IS HERE , NO ENOGH RAM TO MAKE mathmatics
+                adc  = ATD_read_A1();
+
+                T=T0+(BB*log((1023/adc)-1));     // PROBMEL IS HERE , NO ENOGH RAM TO MAKE mathmatics
                 T=1/T;
                 T=T-273.15;
                 k3=T;
 
-                delay_ms(20);         // time for Ultrasonic circuit stabilization .
+                myydelayms(20);         // time for Ultrasonic circuit stabilization .
 
                 TX_Temp=T ;           // Tempereture with out floats
 
-                SpeedOfSound=(float)(331.3+(0.606*T)); // speed of sound m/s=(331.3 + (0.606 * Tc))m/s . Tc is the temperature in Celsius .
+                SpeedOfSound=(331.3+(0.606*T)); // speed of sound m/s=(331.3 + (0.606 * Tc))m/s . Tc is the temperature in Celsius .
                 SpeedOfSound= SpeedOfSound*100 ;        // speed of sound Cm/s .
                 //Reading Tempereture using NTC and determining sound speed according to tempereture
 
 
-                delay_ms(100);
-                ADCON0.F0=0;  // ADC Module OFF
-                   
+                myydelayms(100);
+
                 DHT11();   // Reading Humidity
-                
+
                 // Fan motot ON/OFF control
           if(TX_Temp> 40){
                           increased_temp = TX_Temp - Board_min_temp ;
-                          temp_percentage = (float)Increased_temp / 40 ; //  Board_max_temp - Board_min_temp = 40 .
-                          
-                          PWM2_Set_Duty(temp_percentage * 255);  // Maximinm pulse width (duty cycle) = 255 = maximum fan motor speed .
-                          PWM2_Start();
-                
+                          temp_percentage = Increased_temp / 40 ; //  Board_max_temp - Board_min_temp = 40 .
+
+                          Speed(temp_percentage * 255);  // Maximinm pulse width (duty cycle) = 255 = maximum fan motor speed .
+
+
                           }
-          if(TX_Temp<40){ PWM2_Stop(); PORTC.F1 = 0;} //if tempereture is less than 40 digree celsious Stop Fan motor .
+          if(TX_Temp<40){ Speed(0); } //if tempereture is less than 40 digree celsious Stop Fan motor .
                 //End of Fan motot ON/OFF control
 
-      Index = 1 ; // 1 = Master_T  ,  2 = Pump_T
+
 
 
        // Reading Distance for both tanks using Ultrasonic module
- All_Index :
+
 
                   Distance=0;
                   k1=0;
                   check_sonic=0;
 
 
-      twin:
+
 
               TMR1H =0B00000000;                           //Sets the Initial Value of Timer1 .
               TMR1L =0B00000000;                           //Sets the Initial Value of Timer1 .
-              
+
         if(Index==1){
-                     PORTC.F2=1;           // TRIGERING
-                     delay_us(10);
-                     PORTC.F2=0;
+                     PORTC=PORTC|0B00000100;           // TRIGERING
+                     myydelayms(10);
+                     PORTC=PORTC&0B11111011;
                     }
         if(Index==2){
-                     PORTD.F0=1;           // TRIGERING
-                     delay_us(10);
-                     PORTD.F0=0;
+                     PORTD=PORTD|0B00000001;           // TRIGERING
+                     myydelayms(10);
+                     PORTD=PORTD&0B11111110;
                     }
 
 
-              delay_ms(2);
+              if(Index==1){for(j=0;j<=50000;j++){if(PORTC&0X04){  break;}delay_us(1);}}  // If you increase the delay time more than j<=50000; that me effect on performance of   void External_Powered()
+              if(Index==2){for(j=0;j<=50000;j++){if(PORTD&0X2){  break;}delay_us(1);}}
 
+              T1CON=T1CON|0X01; // timer on
 
-              if(Index==1){for(j=0;j<=50000;j++){if(PORTC.F3==1){  break;}delay_us(1);}}  // If you increase the delay time more than j<=50000; that me effect on performance of   void External_Powered()
-              if(Index==2){for(j=0;j<=50000;j++){if(PORTD.F1==1){  break;}delay_us(1);}}
-
-              T1CON.F0=1;
-
-              if(check_sonic>=1 & j>=50000){k1=0; goto cont;}
-              if(j>=50000){check_sonic++;goto twin;}
+              if(check_sonic>=1 & j>=50000){k1=0; }
+              if(j>=50000){check_sonic++;}
 
               check_sonic=0;
 
-              if(Index==1){for(j=0;j<=50000;j++){if(PORTC.F3==0){ break;} delay_us(1);}}
-              if(Index==2){for(j=0;j<=50000;j++){if(PORTD.F1==0){ break;} delay_us(1);}}
+              if(Index==1){for(j=0;j<=50000;j++){if(!(PORTC&0x04)){ break;} delay_us(1);}}
+              if(Index==2){for(j=0;j<=50000;j++){if(!(PORTD&0x02)){ break;} delay_us(1);}}
 
-              T1CON.F0=0;    // stop TIMER1
+              T1CON=T1CON&0b11111110;    // stop TIMER1
 
               k1 = ((TMR1H<<8)|TMR1L  );  //Reads Timer1 Value
 
-            //k1=k1*4 ;  //   k1=k1*4 because prescaler is 1:4
-              k1=k1*1 ;  //   k1=k1*1 because prescaler is 1:1
-
-             k1= SpeedOfSound*( (float)k1/2000000)/2;        //
+             //k1= SpeedOfSound*( (float)k1/2000000)/2;        //       000000000000
 
 
-  cont:
+
 
             Distance=k1;    // converting from (Longe k1 variable To  unsigned int Distance variable ) , Long variable may cary decimal values which cannot be transmitteted as UART .
          //End of Reading Distance for both tanks using Ultrasonic module
@@ -301,11 +328,11 @@ Keep_Tracking :
 
            Index++;
 
-           if(Index < 3){ goto All_Index ; }
 
-           delay_ms(100);
-             
-update:
+
+           myydelayms(100);
+
+
 
         // pringting all reading on LCD for both pages
      if(LCD_Page==0){   // page 0
@@ -346,17 +373,16 @@ update:
               Lcd_Out_Cp(txt);
               Lcd_Out_Cp("%");
 
-              if(LCD_Page==1){while(PORTB.F0==0){} }
 
                     }
             //End of pringting all reading on LCD for both pages
 
                // Controlling Pump motot ON/OFF according to dertemined level settingg ( see the variables )
-              if(Master_T_Level <= Master_T_Pump_ON_Level & Pump_T_Level >= Pump_T_ON_Level  ){PORTD.F4=1;} // Pump ON
-              if(Master_T_Level >= Master_T_Pump_OFF_Level || Pump_T_Level <= Pump_T_OFF_Level  ){PORTD.F4=0;}
+              if(Master_T_Level <= Master_T_Pump_ON_Level & Pump_T_Level >= Pump_T_ON_Level  ){PORTD=PORTD|0X10;} // Pump ON
+              if(Master_T_Level >= Master_T_Pump_OFF_Level || Pump_T_Level <= Pump_T_OFF_Level  ){PORTD=PORTD&!0X10;}
               //End Controlling Pump motot ON/OFF according to dertemined level settingg
-              
-              delay_ms(1000);
+
+              myydelayms(200);
 
       // ON/OFF LCD Shutter
       if(First_ON_Flag==1){
@@ -366,7 +392,7 @@ update:
                            while(angle<183 ) {
                              if(angle<183){angle++;} //   was 225
 
-                             for(x=0;x<=1900;x++){if(x<angle){PORTD.F2=1;}else{PORTD.F2=0;} }   // 1400 had been calibrated using oscilloscope to be 20ms
+                             for(x=0;x<=1900;x++){if(x<angle){PORTD=PORTD|0X04;}else{PORTD=PORTD&!0X04;} }   // 1400 had been calibrated using oscilloscope to be 20ms
 
                                              }
 
@@ -374,140 +400,100 @@ update:
 
 
       if(Openning_Flag==0){
-      while(PORTC.F6==0 )
+      while(PORTC&0X40 )
             {
               Openning_Flag=1;
 
-             if(PORTC.F6==0){if(angle<183){angle++;}} //   was 225
+             if(PORTC|0X40){if(angle<183){angle++;}} //   was 225
 
-             for(x=0;x<=1900;x++){if(x<angle){PORTD.F2=1;}else{PORTD.F2=0;} }   // 1400 had been calibrated using oscilloscope to be 20ms
+             for(x=0;x<=1900;x++){if(x<angle){PORTD=PORTD|0X04;}else{PORTD=PORTD& !0X04;} }   // 1400 had been calibrated using oscilloscope to be 20ms
 
             } }
-            
+
       if(Openning_Flag==1){
-      while(PORTC.F6==0 )
+      while(!(PORTC&0X40))
             {
               Openning_Flag=0;
-              
-             if(PORTC.F6==0){if(angle>43){angle--;}} //   was 48
 
-             for(x=0;x<=1900;x++){if(x<angle){PORTD.F2=1;}else{PORTD.F2=0;} }   // 1400 had been calibrated using oscilloscope to be 20ms
+             if(PORTC=PORTC& !0X40){if(angle>43){angle--;}} //   was 48
+
+             for(x=0;x<=1900;x++){if(x<angle){PORTD.F2=1;}else{PORTD=PORTD& !0X04;} }   // 1400 had been calibrated using oscilloscope to be 20ms
 
             }  }
         //End of ON/OFF LCD Shutter
 
 
-    goto Keep_Tracking ;
-    
+
+
       }
 
 
 
 void interrupt(){
 
+     if(INTCON & 0x04){
+         timer++;
 
-        if(INTCON.INTF==1){     // Interrupt action for scrolling through the 2 LCD pages ( page 0 or 1)
-                          delay_ms(10);
-                          if(PORTB.F0==0){
-                          if(LCD_Page==0){LCD_Page = 1; goto pass ;}
+         INTCON = INTCON & 0xFB;
+
+     }
+
+
+
+        if(INTCON & 0x02){     // Interrupt action for scrolling through the 2 LCD pages ( page 0 or 1)
+
+                          if(!(PORTB&0X01)){
+                          if(LCD_Page==0){LCD_Page = 1;}
                           if(LCD_Page==1){LCD_Page = 0;}
-                    pass:
 
-                          if(PORTC.F0==0){Servo_Flag=1;}
+
+                          if(!(PORTC&0X01)){Servo_Flag=1;}
                                           }
-                          INTCON.INTF=0;
+                           INTCON = INTCON & 0B11111101;//Clear T0IF
+
                           }
 
 
                  }
 
 
+
 void main() {
 
      ADCON0=0B01000000; ;
-     ADCON1=0B01000100;          // PIC16F877  ..  AN0 , AN1 , AN3 are analog inputs
+     ADCON1=0B01000000;          //ALL PORTA are analog inputs
 
-     INTCON.F7= 1;           // Global Interrupt Enable bit
-     INTCON.F6= 1;           //Peripheral Interrupt Enable bit
+     INTCON = 0b11110000; //GIE and , T0IE, TIMER0
+
 
      T1CON = 0B00000000;     //Initializing Timer Module at prescaler value of 1:1
 
-     INTCON.INTE = 1;        // Enables the RB0/INT external interrupt
-     INTCON.INTF=0;          // Clear extewrnat Interrupt Flag bit .
-     OPTION_REG.f6=0;        // falling edge
+
+     OPTION_REG = 0x87; // 1ms overflow
+     TMR0 = 238;
 
 
      CCP1CON=0B00000000 ;    //stop comparators
-     CCP2CON=0B00000000 ;    //stop comparators
-         
 
-     TRISA=0B11111111;
-     TRISB=0B11111111;
-     TRISC=0B11111111;
-     TRISD=0B11111111;
-     TRISE=0B00000111;
-         
-         
-      // LCD
-     TRISB.F5=0;
-     PORTB.F5=1;   // LCD ON/OFF Port                                                                                         Q
 
-     TRISD.F5=0;
-     PORTD.F5=1;   // LCD LED  ON/OFF Port
+     TRISA=0B11111011;
+     TRISB=0B00000001;
+     TRISC=0B01001001;
+     TRISD=0B00000010;
+     TRISE=0X00;
+
+
+      // LCDTRISB=0X01;         //ALL OUPUT , RB0 INPUT
+     PORTB=0X01;   // LCD ON/OFF Port                                                                                         Q
+
+
+     PORTD=0X20;   // LCD LED  ON/OFF Port
      // End of LCD
-     
-     // Ultrasonic Ports
-     TRISC.F2=0;  // Triger 1 (T1)
-     TRISC.F3=1;  // Echo 1   (E1)
-     TRISD.F0=0;  // Triger 2 (T2)
-     TRISD.F1=1;  // Echo 2   (E2)
-     
-     PORTC.F2=0;  // Triger 1 is LOW
-     PORTD.F0=0;  // Triger 2 is LOW
-     
-     // End of Ultrasonic Ports
-     
-     
-     // Pump Ports
-     TRISD.F4=0;
-     PORTD.F4=0;   // Pump is OFF .. N-Chanel Mosfet is used
-     // End of Pump Ports
-     
-     // Buzzer Ports
-     TRISC.F5=0;
-     PORTC.F5=0;   // Buzzer is OFF
-     // End of Buzzer Ports Ports
-     
-     // NTC Ports
-     TRISA.F2=0;   //  ADCON1=0B00000100;   // PIC16F877  ..  AN0 , AN1 , AN3 are analog inputs
-     PORTA.F2=1;   // Giving VDD to NTC
-     TRISA.F1=1;   // NTC Analog input port .
-     // End of NTC Ports
-     
-     
-     // Buttons In Put Ports
-     TRISB.F0 = 1;         //  External Interrup  ( Yellow Button )
-     TRISC.F6 = 1;         //  General Used Input ( Blue Button  )
-     // End of Buttons In Put Ports
 
+     // NTC Ports           Give 5
 
-     // Servo Ports
-     TRISD.F2=0;       // Servo signal out put
-     PORTD.F2=0;
-     // End of Servo Ports
-     
-     
-     // DHT11 Ports
-     TRISC.F4=1;
-     // End of DHT11 Ports
-     
-     // H-Bridge Ports
-        TRISC.F1=0;    // Clock wise rotation  ... PWM out put .
-        TRISC.F7=0;    // Anit Clock wise rotation
-        PORTC.F1=0;
-        PORTC.F7=0;
-     // End of H-Bridge Ports
-     
+     PORTA=PORTA&0X04;   // Giving VDD to NTC
+
   // LCD initialization
      Lcd_Init();
      lcd_cmd(_LCD_CURSOR_OFF);  // Cursor off.
@@ -515,21 +501,20 @@ void main() {
   // End of LCD initialization
 
 
-     delay_ms(200);
-     
-     PWM2_Init(1000);  //   initialize PWM module at a frequensy 1000HZ
+     myydelayms(200);
 
-     /////////////////////////////////////////////////////////////////////////////////////////////////
-     
+
      angle = 224;
+
+     while(1){
      while(angle>43)   // calibrate the shutter at right angle .
             {
             angle--;
-            for(x=0;x<=1900;x++){if(x<angle){PORTD.F2=1;}else{PORTD.F2=0;} }   // 1400 had been calibrated using oscilloscope to be 20ms
+            for(x=0;x<=1900;x++){if(x<angle){PORTD=PORTD|0x04;}else{PORTD=PORTD& !0x04;} }   // 1400 had been calibrated using oscilloscope to be 20ms
             }
 
-     delay_ms(100);
-      
-     Read_Print_Control();
+     myydelayms(100);
 
+     Read_Print_Control();
+     }
      }
